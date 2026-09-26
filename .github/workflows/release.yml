@@ -1,4 +1,4 @@
-name: Release macOS
+name: Release desktop
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-macos
+  group: release-desktop
   cancel-in-progress: false
 
 defaults:
@@ -20,7 +20,32 @@ defaults:
 jobs:
   build:
     if: github.ref == 'refs/heads/main'
-    runs-on: macos-15
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+            machine: arm64
+          # Ubuntu 22.04 keeps the Linux glibc baseline compatible with 22.04+.
+          # Native ARM runners avoid emulation and AppImage cross-compilation.
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
+            machine: x86_64
+            deb_arch: amd64
+            appimage_arch: x86_64
+            elf_machine: Advanced Micro Devices X86-64
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            bundles: deb,appimage
+            machine: aarch64
+            deb_arch: arm64
+            appimage_arch: aarch64
+            elf_machine: AArch64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -36,10 +61,34 @@ jobs:
         with:
           bun-version: 1.4.2
 
-      - name: Install Rust
+      - name: Cache Bun downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.4.2-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-1.4.2-
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
         run: |
-          rustup toolchain install 1.97.1 --profile minimal --target aarch64-apple-darwin
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file patchelf \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install Rust
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal --target "$TARGET"
           rustup default 1.97.1
+
+      - name: Cache Rust dependencies and build outputs
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+          cache-on-failure: true
 
       - name: Prepare release version
         id: version
@@ -68,29 +117,58 @@ jobs:
           bun run check
           bun test src
 
-      - name: Build unsigned Apple Silicon DMG
+      - name: Build desktop bundles
+        env:
+          TARGET: ${{ matrix.target }}
+          BUNDLES: ${{ matrix.bundles }}
+          MACHINE: ${{ matrix.machine }}
+          # Cargo strips our binary. Leave bundled Linux system libraries intact.
+          NO_STRIP: "true"
         run: |
-          test "$(uname -m)" = arm64
-          bun run tauri build --ci --no-sign --target aarch64-apple-darwin \
-            --bundles app,dmg --config "$RUNNER_TEMP/release-config.json" -- --locked
+          test "$(uname -m)" = "$MACHINE"
+          # Sign the completed macOS bundle before Tauri creates its DMG.
+          bun run tauri build --ci --target "$TARGET" \
+            --bundles "$BUNDLES" --config "$RUNNER_TEMP/release-config.json" -- --locked
 
       - name: Verify and stage DMG
+        if: runner.os == 'macOS'
         env:
           ASSET: ${{ steps.version.outputs.asset }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           bundle=src-tauri/target/aarch64-apple-darwin/release/bundle
-          lipo "$bundle/macos/Spiraler.app/Contents/MacOS/spiraler" -verify_arch arm64
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
-            "$bundle/macos/Spiraler.app/Contents/Info.plist")" = "$VERSION"
-          hdiutil verify "$bundle/dmg/$ASSET"
+          bash scripts/verify-macos-dmg.sh "$bundle/dmg/$ASSET" "$VERSION"
           mkdir -p release
           cp "$bundle/dmg/$ASSET" "release/$ASSET"
 
+      - name: Verify and stage Linux packages
+        if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ steps.version.outputs.version }}
+          DEB_ARCH: ${{ matrix.deb_arch }}
+          APPIMAGE_ARCH: ${{ matrix.appimage_arch }}
+          ELF_MACHINE: ${{ matrix.elf_machine }}
+        run: |
+          bundle="src-tauri/target/$TARGET/release/bundle"
+          shopt -s nullglob
+          debs=("$bundle"/deb/*_"$VERSION"_"$DEB_ARCH".deb)
+          appimages=("$bundle"/appimage/*_"$VERSION"_*.AppImage)
+          test "${#debs[@]}" -eq 1
+          test "${#appimages[@]}" -eq 1
+          test "$(dpkg-deb --field "${debs[0]}" Architecture)" = "$DEB_ARCH"
+          test "$(dpkg-deb --field "${debs[0]}" Version)" = "$VERSION"
+          readelf -h "src-tauri/target/$TARGET/release/spiraler" | grep -F "$ELF_MACHINE"
+          readelf -h "${appimages[0]}" | grep -F "$ELF_MACHINE"
+          mkdir -p release
+          cp "${debs[0]}" "release/Spiraler_${VERSION}_${DEB_ARCH}.deb"
+          cp "${appimages[0]}" "release/Spiraler_${VERSION}_${APPIMAGE_ARCH}.AppImage"
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: macos-dmg
-          path: release/*.dmg
+          name: release-${{ matrix.target }}
+          path: release/*
+          compression-level: 0
           if-no-files-found: error
           retention-days: 7
 
@@ -109,7 +187,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: macos-dmg
+          pattern: release-*
+          merge-multiple: true
           path: release
 
       - name: Publish release with generated notes
@@ -119,17 +198,27 @@ jobs:
           if gh release view "$TAG" --json targetCommitish,isDraft > "$RUNNER_TEMP/existing-release.json"; then
             test "$(jq -r .targetCommitish "$RUNNER_TEMP/existing-release.json")" = "$RELEASE_COMMIT"
             if test "$(jq -r .isDraft "$RUNNER_TEMP/existing-release.json")" = true; then
-              gh release upload "$TAG" "release/$ASSET" --clobber
+              gh release upload "$TAG" release/* --clobber
               gh release edit "$TAG" --draft=false
+            else
+              # Preserve already-published bytes while adding any missing assets.
+              gh release view "$TAG" --json assets --jq '.assets[].name' > "$RUNNER_TEMP/published-assets.txt"
+              for artifact in release/*; do
+                if ! grep -Fxq "$(basename "$artifact")" "$RUNNER_TEMP/published-assets.txt"; then
+                  gh release upload "$TAG" "$artifact"
+                fi
+              done
             fi
           else
             cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
-          Unsigned macOS build for Apple Silicon.
+          macOS build for Apple Silicon, ad-hoc signed and not notarized.
+          Linux builds for x86_64 and ARM64, packaged as .deb and AppImage for Ubuntu 22.04 or newer.
 
           Install with `brew install --cask gridness/oosama/spiraler`, or download the DMG below.
-          macOS may require approval in System Settings > Privacy & Security because this build is not signed or notarized.
+          macOS requires first-launch approval in System Settings > Privacy & Security because this build is not notarized.
+          On Linux, install the .deb with your package manager or make the AppImage executable and run it. Install and sign in to the Codex CLI to generate images.
           NOTES
-            gh release create "$TAG" "release/$ASSET" \
+            gh release create "$TAG" release/* \
               --target "$RELEASE_COMMIT" --title "Spiraler $VERSION" \
               --draft --generate-notes --notes-file "$RUNNER_TEMP/release-notes.md"
             gh release edit "$TAG" --draft=false
@@ -197,7 +286,7 @@ jobs:
             app "Spiraler.app"
 
             caveats <<~EOS
-              Spiraler is unsigned and not notarized. macOS may require approval
+              Spiraler is ad-hoc signed and not notarized. macOS requires approval
               in System Settings > Privacy & Security before the first launch.
               Sign in to Codex to generate images.
             EOS

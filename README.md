@@ -19,13 +19,19 @@ Build a local macOS application:
 bun run tauri build --bundles app
 ```
 
-The bundle is written to `src-tauri/target/release/bundle/macos/Spiraler.app`. It is not signed or notarized. For Windows and Linux, install their Tauri prerequisites and override the bundle target, for example `bun run tauri build --bundles nsis` or `--bundles appimage` on the matching OS. Those platforms have not been exercised here.
+The bundle is written to `src-tauri/target/release/bundle/macos/Spiraler.app`. It is ad-hoc signed and not notarized. For Windows and Linux, install their Tauri prerequisites and override the bundle target, for example `bun run tauri build --bundles nsis` or `--bundles deb,appimage` on the matching OS. Windows has not been exercised here.
 
 ## Releases and Homebrew
 
-Every push to `main` runs [the macOS release workflow](.github/workflows/release.yml). It builds an unsigned Apple Silicon DMG, attaches it to a GitHub release with [automatically generated release notes](https://cli.github.com/manual/gh_release_create), and updates `Casks/spiraler.rb` in `gridness/homebrew-oosama`. The workflow can also be run manually on `main`.
+Every push to `main` runs [the desktop release workflow](.github/workflows/release.yml). It builds an Apple Silicon DMG and Linux ARM64 and x86_64 packages in parallel on native runners, attaches them to a GitHub release with [automatically generated release notes](https://cli.github.com/manual/gh_release_create), and updates `Casks/spiraler.rb` in `gridness/homebrew-oosama`. The workflow can also be run manually on `main`.
 
-Release versions use the major and minor numbers from `src-tauri/tauri.conf.json`, with the workflow run number added to its patch number. For example, base `0.1.0` and run `12` produce `0.1.12`, tag `v0.1.12`, and `Spiraler_0.1.12_aarch64.dmg`. The app bundle uses the same version. Rerunning a workflow keeps its version and reuses the published DMG; an older run cannot downgrade the cask.
+The macOS app is ad-hoc signed before packaging. The workflow mounts the finished DMG and verifies its app signature, sealed resources, architecture, and version before publication. This avoids shipping an app with only a linker signature, which macOS reports as damaged. Ad-hoc signing does not notarize the app or establish an Apple-verified publisher identity. See [Tauri's signing documentation](https://v2.tauri.app/distribute/sign/macos/).
+
+Linux downloads include `Spiraler_<version>_amd64.deb` and `Spiraler_<version>_x86_64.AppImage` for x86_64, and `Spiraler_<version>_arm64.deb` and `Spiraler_<version>_aarch64.AppImage` for ARM64. The native builds use Ubuntu 22.04 as their minimum glibc baseline. Install the matching `.deb` with `sudo apt install ./Spiraler_<version>_<arch>.deb`, or run `chmod +x` on the matching AppImage and launch it. Install and sign in to the official Codex CLI to generate images on Linux as well.
+
+Bun downloads and Rust dependencies and build outputs are cached separately for each platform and architecture. Rust release builds use Thin LTO and parallel code generation to reduce compile and link work. Artifact uploads skip recompressing the already-compressed installers. A first build still needs to populate the caches.
+
+Release versions use the major and minor numbers from `src-tauri/tauri.conf.json`, with the workflow run number added to its patch number. For example, base `0.1.0` and run `12` produce `0.1.12`, tag `v0.1.12`, and `Spiraler_0.1.12_aarch64.dmg`. All three builds use the same version. Rerunning a workflow keeps its version, preserves published assets, and adds missing downloads; an older run cannot downgrade the cask.
 
 The workflow uses your GitHub App with client ID `Iv23liat5k1xe9You0z0`, installed in `spiraler` and `homebrew-oosama`. Add its PEM private key as the `APP_PRIVATE_KEY` repository Actions secret in `spiraler`. The app must have **Contents: read and write** permission for `homebrew-oosama`, and the tap must allow it to push to `main`. The workflow uses [GitHub's App token action](https://github.com/actions/create-github-app-token) to mint a token scoped to the tap and revoke it when the job finishes. It uses the repository's `GITHUB_TOKEN` to publish Spiraler releases. No Apple signing credentials are required.
 
@@ -37,7 +43,13 @@ brew install --cask gridness/oosama/spiraler
 
 Homebrew also installs the [Codex CLI cask](https://formulae.brew.sh/cask/codex) as a dependency. Sign in as described above to generate images. For a direct DMG installation, install the Codex CLI yourself.
 
-The build is unsigned and not notarized. macOS may require approval in **System Settings → Privacy & Security** before the first launch.
+The macOS build is ad-hoc signed and not notarized. After trying to open the installed app, approve it in **System Settings → Privacy & Security → Open Anyway** before the first launch. A launch without this approval requires Developer ID signing and Apple notarization, which need Apple Developer credentials.
+
+To verify a macOS release locally:
+
+```sh
+bash scripts/verify-macos-dmg.sh /path/to/Spiraler_0.1.12_aarch64.dmg 0.1.12
+```
 
 ## Subscription integration
 

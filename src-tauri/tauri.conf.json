@@ -10,5 +10,5 @@
       "capabilities": ["main"]
     }
   },
-  "bundle": { "active": true, "targets": ["app"], "category": "GraphicsAndDesign", "shortDescription": "Make a whole world of assets.", "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"] }
+  "bundle": { "active": true, "targets": ["app"], "category": "GraphicsAndDesign", "shortDescription": "Make a whole world of assets.", "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"], "macOS": { "signingIdentity": "-" } }
 }
