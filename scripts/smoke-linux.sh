@@ -13,6 +13,13 @@ XDG_DATA_HOME="$state/data" XDG_CONFIG_HOME="$state/config" \
 if test "$status" -ne 124; then
   cat "$state/startup.log"
   echo "Spiraler exited during the GUI startup check with status $status" >&2
+  if command -v gdb >/dev/null; then
+    XDG_DATA_HOME="$state/data" XDG_CONFIG_HOME="$state/config" \
+      XDG_CACHE_HOME="$state/cache" XDG_RUNTIME_DIR="$state" \
+      WEBKIT_DISABLE_DMABUF_RENDERER=1 \
+      xvfb-run -a timeout 30s gdb --batch -ex 'set follow-fork-mode child' \
+        -ex run -ex 'thread apply all bt' --args bash "$executable" || true
+  fi
   exit 1
 fi
 echo "Spiraler stayed running through the GUI startup check."

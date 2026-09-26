@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      verify_homebrew_only:
+        description: Test the published Homebrew packages without rebuilding
+        type: boolean
+        default: false
 
 # ASVS 13.3.2: building the app only needs read access to this repository.
 permissions:
@@ -19,7 +24,7 @@ defaults:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !inputs.verify_homebrew_only
     name: Build ${{ matrix.target }}
     strategy:
       fail-fast: false
@@ -287,6 +292,7 @@ jobs:
 
   verify-homebrew:
     needs: publish
+    if: always() && github.ref == 'refs/heads/main' && (needs.publish.result == 'success' || inputs.verify_homebrew_only)
     name: Verify Homebrew on ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -305,7 +311,7 @@ jobs:
       - name: Install GUI test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends xvfb xauth
+          sudo apt-get install -y --no-install-recommends xvfb xauth gdb
 
       - name: Install and launch the published Linux formula and cask
         run: |
@@ -314,7 +320,11 @@ jobs:
           brew update
           brew tap gridness/oosama
           brew install --formula gridness/oosama/spiraler
-          bash scripts/smoke-linux.sh "$(brew --prefix)/bin/spiraler"
+          formula_status=0
+          bash scripts/smoke-linux.sh "$(brew --prefix)/bin/spiraler" || formula_status=$?
           brew uninstall --formula gridness/oosama/spiraler
           brew install --cask gridness/oosama/spiraler
-          bash scripts/smoke-linux.sh "$(brew --prefix)/bin/spiraler"
+          cask_status=0
+          bash scripts/smoke-linux.sh "$(brew --prefix)/bin/spiraler" || cask_status=$?
+          test "$formula_status" -eq 0
+          test "$cask_status" -eq 0
