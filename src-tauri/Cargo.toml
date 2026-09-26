@@ -28,6 +28,13 @@ tokio = { version = "1", features = ["process", "time", "io-util", "sync", "rt-m
 
 [dev-dependencies]
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+glib = "0.18.5"
+
+[patch.crates-io]
+# Backported gtk-rs-core#1343 while retaining Tauri's GTK 3 API compatibility.
+glib = { path = "vendor/glib" }
+
 [profile.release]
 # Thin LTO and parallel code generation keep optimized builds cheaper to link.
 lto = "thin"

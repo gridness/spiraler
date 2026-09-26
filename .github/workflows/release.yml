@@ -122,7 +122,7 @@ jobs:
           bun install --frozen-lockfile
           bun run check
           bun test src
-          python3 -m unittest discover -s scripts -p 'test_*.py'
+          python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
       - name: Build desktop bundles
         env:
@@ -137,6 +137,14 @@ jobs:
           bun run tauri build --ci --target "$TARGET" \
             --bundles "$BUNDLES" --config "$RUNNER_TEMP/release-config.json" -- --locked
 
+      - name: Test optimized GLib security backport
+        if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --locked \
+            --release --target "$TARGET" --test glib_variant_iter
+
       - name: Verify and stage DMG
         if: runner.os == 'macOS'
         env:
@@ -144,7 +152,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           bundle=src-tauri/target/aarch64-apple-darwin/release/bundle
-          bash scripts/verify-macos-dmg.sh "$bundle/dmg/$ASSET" "$VERSION"
+          bash .github/scripts/verify-macos-dmg.sh "$bundle/dmg/$ASSET" "$VERSION"
           mkdir -p release
           cp "$bundle/dmg/$ASSET" "release/$ASSET"
 
@@ -272,7 +280,7 @@ jobs:
           GH_TOKEN: ${{ steps.homebrew-token.outputs.token }}
           APP_SLUG: ${{ steps.homebrew-token.outputs.app-slug }}
         run: |
-          python3 scripts/update_homebrew.py "$VERSION" "$GH_REPO" published homebrew-tap
+          python3 .github/scripts/update_homebrew.py "$VERSION" "$GH_REPO" published homebrew-tap
           ruby -c homebrew-tap/Casks/spiraler.rb
           ruby -c homebrew-tap/Formula/spiraler.rb
           # Attribute the commit to the same App that authenticates the push.
@@ -322,10 +330,10 @@ jobs:
           brew tap gridness/oosama
           brew install --formula gridness/oosama/spiraler
           formula_status=0
-          bash scripts/smoke-linux.sh "$(brew --prefix)/bin/spiraler" || formula_status=$?
+          bash .github/scripts/smoke-linux.sh "$(brew --prefix)/bin/spiraler" || formula_status=$?
           brew uninstall --formula gridness/oosama/spiraler
           brew install --cask gridness/oosama/spiraler
           cask_status=0
-          bash scripts/smoke-linux.sh "$(brew --prefix)/bin/spiraler" || cask_status=$?
+          bash .github/scripts/smoke-linux.sh "$(brew --prefix)/bin/spiraler" || cask_status=$?
           test "$formula_status" -eq 0
           test "$cask_status" -eq 0

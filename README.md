@@ -31,6 +31,8 @@ Linux downloads include `Spiraler_<version>_amd64.deb` and `Spiraler_<version>_x
 
 Bun downloads and Rust dependencies and build outputs are cached separately for each platform and architecture. Rust release builds use Thin LTO and parallel code generation to reduce compile and link work. Artifact uploads skip recompressing the already-compressed installers. A first build still needs to populate the caches.
 
+Workflow helpers, publication tests, and Homebrew templates live under `.github/scripts`. Linux builds use a [documented GLib security backport](src-tauri/vendor/README.md) for RUSTSEC-2024-0429, with optimized iterator regression tests on both architectures.
+
 Release versions use the major and minor numbers from `src-tauri/tauri.conf.json`, with the workflow run number added to its patch number. For example, base `0.1.0` and run `12` produce `0.1.12`, tag `v0.1.12`, and `Spiraler_0.1.12_aarch64.dmg`. All three builds use the same version. Rerunning a workflow keeps its version, preserves published assets, and adds missing downloads; an older run cannot downgrade the cask.
 
 The workflow uses your GitHub App with client ID `Iv23liat5k1xe9You0z0`, installed in `spiraler` and `homebrew-oosama`. Add its PEM private key as the `APP_PRIVATE_KEY` repository Actions secret in `spiraler`. The app must have **Contents: read and write** permission for `homebrew-oosama`, and the tap must allow it to push to `main`. The workflow uses [GitHub's App token action](https://github.com/actions/create-github-app-token) to mint a token scoped to the tap and revoke it when the job finishes. The tap commit uses that App's bot name and email, and the App authenticates its push. It uses the repository's `GITHUB_TOKEN` to publish Spiraler releases. No Apple signing credentials are required.
@@ -57,7 +59,7 @@ The macOS build is ad-hoc signed and not notarized. After trying to open the ins
 To verify a macOS release locally:
 
 ```sh
-bash scripts/verify-macos-dmg.sh /path/to/Spiraler_0.1.12_aarch64.dmg 0.1.12
+bash .github/scripts/verify-macos-dmg.sh /path/to/Spiraler_0.1.12_aarch64.dmg 0.1.12
 ```
 
 ## Subscription integration
@@ -91,7 +93,7 @@ After restart, jobs interrupted during generation become failed and the remainin
 ```sh
 bun run check
 bun test src
-python3 -m unittest discover -s scripts -p 'test_*.py'
+python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 bun run build
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
