@@ -41,7 +41,10 @@ def update_tap(version, repo, published, tap):
     }.items():
         # ASVS 11.4.1: hash the downloaded release, never a potentially different rebuild.
         with (published / f"Spiraler_{version}_{suffix}").open("rb") as asset:
-            values[key] = hashlib.file_digest(asset, "sha256").hexdigest()
+            digest = hashlib.sha256()
+            for chunk in iter(lambda: asset.read(1024 * 1024), b""):
+                digest.update(chunk)
+            values[key] = digest.hexdigest()
 
     templates = Path(__file__).parent / "homebrew"
     for relative, template in definitions.items():
