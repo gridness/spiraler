@@ -21,6 +21,24 @@ bun run tauri build --bundles app
 
 The bundle is written to `src-tauri/target/release/bundle/macos/Spiraler.app`. It is not signed or notarized. For Windows and Linux, install their Tauri prerequisites and override the bundle target, for example `bun run tauri build --bundles nsis` or `--bundles appimage` on the matching OS. Those platforms have not been exercised here.
 
+## Releases and Homebrew
+
+Every push to `main` runs [the macOS release workflow](.github/workflows/release.yml). It builds an unsigned Apple Silicon DMG, attaches it to a GitHub release with [automatically generated release notes](https://cli.github.com/manual/gh_release_create), and updates `Casks/spiraler.rb` in `gridness/homebrew-oosama`. The workflow can also be run manually on `main`.
+
+Release versions use the major and minor numbers from `src-tauri/tauri.conf.json`, with the workflow run number added to its patch number. For example, base `0.1.0` and run `12` produce `0.1.12`, tag `v0.1.12`, and `Spiraler_0.1.12_aarch64.dmg`. The app bundle uses the same version. Rerunning a workflow keeps its version and reuses the published DMG; an older run cannot downgrade the cask.
+
+The workflow uses your GitHub App with client ID `Iv23liat5k1xe9You0z0`, installed in `spiraler` and `homebrew-oosama`. Add its PEM private key as the `APP_PRIVATE_KEY` repository Actions secret in `spiraler`. The app must have **Contents: read and write** permission for `homebrew-oosama`, and the tap must allow it to push to `main`. The workflow uses [GitHub's App token action](https://github.com/actions/create-github-app-token) to mint a token scoped to the tap and revoke it when the job finishes. It uses the repository's `GITHUB_TOKEN` to publish Spiraler releases. No Apple signing credentials are required.
+
+Once the first release and cask update finish, install with:
+
+```sh
+brew install --cask gridness/oosama/spiraler
+```
+
+Homebrew also installs the [Codex CLI cask](https://formulae.brew.sh/cask/codex) as a dependency. Sign in as described above to generate images. For a direct DMG installation, install the Codex CLI yourself.
+
+The build is unsigned and not notarized. macOS may require approval in **System Settings → Privacy & Security** before the first launch.
+
 ## Subscription integration
 
 Direct third-party access to ChatGPT's image subscription is not documented by OpenAI. Spiraler uses the explicitly authorized fallback: the official Codex CLI with ChatGPT sign-in and its built-in image generator. It never reads browser cookies or Codex authentication files, implements private OpenAI endpoints, or silently switches to API billing.
