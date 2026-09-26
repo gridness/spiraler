@@ -19,8 +19,12 @@ class Spiraler < Formula
     system "./#{appimage}", "--appimage-extract"
     libexec.install Pathname("squashfs-root").children
     (bin/"spiraler").write_env_script libexec/"AppRun", APPDIR: libexec
-    (share/"applications").install Dir[libexec/"usr/share/applications/*.desktop"]
-    share.install libexec/"usr/share/icons" if (libexec/"usr/share/icons").directory?
+    # AppRun follows the AppDir's desktop-file symlink. Keep its target in place.
+    (share/"applications").install_symlink Dir[libexec/"usr/share/applications/*.desktop"]
+    if (libexec/"usr/share/icons").directory?
+      (share/"icons").mkpath
+      cp_r (libexec/"usr/share/icons").children, share/"icons"
+    end
   end
 
   def caveats

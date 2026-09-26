@@ -311,7 +311,8 @@ jobs:
       - name: Install GUI test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends xvfb xauth gdb
+          sudo apt-get install -y --no-install-recommends \
+            xvfb xauth gdb libegl1 libgl1 libgbm1 libgl1-mesa-dri
 
       - name: Install and launch the published Linux formula and cask
         run: |

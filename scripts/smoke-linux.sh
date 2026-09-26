@@ -17,7 +17,8 @@ if test "$status" -ne 124; then
     XDG_DATA_HOME="$state/data" XDG_CONFIG_HOME="$state/config" \
       XDG_CACHE_HOME="$state/cache" XDG_RUNTIME_DIR="$state" \
       WEBKIT_DISABLE_DMABUF_RENDERER=1 \
-      xvfb-run -a timeout 30s gdb --batch -ex 'set follow-fork-mode child' \
+      xvfb-run -a timeout 30s gdb --batch -ex 'set detach-on-fork off' \
+        -ex 'set schedule-multiple on' \
         -ex run -ex 'thread apply all bt' --args bash "$executable" || true
   fi
   exit 1
