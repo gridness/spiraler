@@ -80,7 +80,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           bundle=src-tauri/target/aarch64-apple-darwin/release/bundle
-          lipo -verify_arch arm64 "$bundle/macos/Spiraler.app/Contents/MacOS/spiraler"
+          lipo "$bundle/macos/Spiraler.app/Contents/MacOS/spiraler" -verify_arch arm64
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
             "$bundle/macos/Spiraler.app/Contents/Info.plist")" = "$VERSION"
           hdiutil verify "$bundle/dmg/$ASSET"
