@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Spiraler", "version": "0.1.0", "identifier": "studio.spiraler.desktop",
+  "build": { "beforeDevCommand": "bun run dev", "devUrl": "http://localhost:1433", "beforeBuildCommand": "bun run build", "frontendDist": "../dist" },
+  "app": {
+    "windows": [{ "label": "main", "title": "Spiraler", "width": 1360, "height": 900, "minWidth": 900, "minHeight": 640, "backgroundColor": "#191a19" }],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost; script-src 'self'",
+      "assetProtocol": { "enable": true, "scope": ["$APPDATA/projects/**"] },
+      "capabilities": ["main"]
+    }
+  },
+  "bundle": { "active": true, "targets": ["app"], "category": "GraphicsAndDesign", "shortDescription": "Make a whole world of assets.", "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"] }
+}
