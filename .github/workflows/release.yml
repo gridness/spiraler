@@ -74,7 +74,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev build-essential curl wget file patchelf \
-            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev xdg-utils
+          test -x /usr/bin/xdg-open
 
       - name: Install Rust
         env:
@@ -116,6 +117,7 @@ jobs:
           bun install --frozen-lockfile
           bun run check
           bun test src
+          python3 -m unittest discover -s scripts -p 'test_*.py'
 
       - name: Build desktop bundles
         env:
@@ -185,6 +187,10 @@ jobs:
       GH_REPO: ${{ github.repository }}
       RELEASE_COMMIT: ${{ github.sha }}
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           pattern: release-*
@@ -214,7 +220,8 @@ jobs:
           macOS build for Apple Silicon, ad-hoc signed and not notarized.
           Linux builds for x86_64 and ARM64, packaged as .deb and AppImage for Ubuntu 22.04 or newer.
 
-          Install with `brew install --cask gridness/oosama/spiraler`, or download the DMG below.
+          Install with `brew install --cask gridness/oosama/spiraler` on macOS or Linux.
+          Linux also supports `brew install --formula gridness/oosama/spiraler` and the `spiraler` launcher.
           macOS requires first-launch approval in System Settings > Privacy & Security because this build is not notarized.
           On Linux, install the .deb with your package manager or make the AppImage executable and run it. Install and sign in to the Codex CLI to generate images.
           NOTES
@@ -224,7 +231,7 @@ jobs:
             gh release edit "$TAG" --draft=false
           fi
           # Reruns must hash the published asset, which can differ from a rebuild.
-          gh release download "$TAG" --pattern "$ASSET" --dir published
+          gh release download "$TAG" --pattern "$ASSET" --pattern '*.AppImage' --dir published
 
       - name: Check GitHub App private key
         env:
@@ -255,52 +262,59 @@ jobs:
           token: ${{ steps.homebrew-token.outputs.token }}
           path: homebrew-tap
 
-      - name: Update Homebrew cask
+      - name: Update Homebrew cask and Linux formula
+        env:
+          GH_TOKEN: ${{ steps.homebrew-token.outputs.token }}
+          APP_SLUG: ${{ steps.homebrew-token.outputs.app-slug }}
         run: |
-          # ASVS 11.4.1/11.4.3: Homebrew verifies the published DMG with SHA-256.
-          sha256=$(sha256sum "published/$ASSET" | cut -d ' ' -f 1)
-          cask=homebrew-tap/Casks/spiraler.rb
-          if test -f "$cask"; then
-            current=$(sed -n 's/^  version "\([0-9.]*\)"$/\1/p' "$cask")
-            newest=$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -n 1)
-            if test -n "$current" && test "$newest" != "$VERSION"; then
-              echo "A newer cask is already published; skipping this older run."
-              exit 0
-            fi
-          fi
-          mkdir -p homebrew-tap/Casks
-          # ASVS 1.2.5: use quoted shell variables, never expression interpolation.
-          cat > "$cask" <<EOF
-          cask "spiraler" do
-            version "$VERSION"
-            sha256 "$sha256"
-
-            url "https://github.com/$GH_REPO/releases/download/v#{version}/Spiraler_#{version}_aarch64.dmg"
-            name "Spiraler"
-            desc "Local asset studio for coherent visual families"
-            homepage "https://github.com/$GH_REPO"
-
-            depends_on arch: :arm64
-            depends_on cask: "codex"
-
-            app "Spiraler.app"
-
-            caveats <<~EOS
-              Spiraler is ad-hoc signed and not notarized. macOS requires approval
-              in System Settings > Privacy & Security before the first launch.
-              Sign in to Codex to generate images.
-            EOS
-          end
-          EOF
-          ruby -c "$cask"
-          git -C homebrew-tap config user.name gridness
-          git -C homebrew-tap config user.email 61116326+gridness@users.noreply.github.com
-          git -C homebrew-tap add Casks/spiraler.rb
+          python3 scripts/update_homebrew.py "$VERSION" "$GH_REPO" published homebrew-tap
+          ruby -c homebrew-tap/Casks/spiraler.rb
+          ruby -c homebrew-tap/Formula/spiraler.rb
+          # Attribute the commit to the same App that authenticates the push.
+          bot_name="${APP_SLUG}[bot]"
+          bot_id=$(gh api "users/$bot_name" --jq .id)
+          git -C homebrew-tap config user.name "$bot_name"
+          git -C homebrew-tap config user.email "${bot_id}+${bot_name}@users.noreply.github.com"
+          git -C homebrew-tap add Casks/spiraler.rb Formula/spiraler.rb
           if git -C homebrew-tap diff --cached --quiet; then
-            echo "Homebrew cask is already up to date."
+            echo "Homebrew packages are already up to date."
             exit 0
           fi
-          git -C homebrew-tap commit -m "Updated Spiraler cask to $VERSION"
+          git -C homebrew-tap commit -m "Updated Spiraler cask and Linux formula to $VERSION"
           # Rebase over unrelated tap updates without overwriting their commits.
           git -C homebrew-tap pull --rebase origin main
           git -C homebrew-tap push origin HEAD:main
+
+  verify-homebrew:
+    needs: publish
+    name: Verify Homebrew on ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Install GUI test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth
+
+      - name: Install and launch the published Linux formula and cask
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          # Runner images can have an older brew without Linux cask support.
+          brew update
+          brew tap gridness/oosama
+          brew install --formula gridness/oosama/spiraler
+          bash scripts/smoke-linux.sh "$(brew --prefix)/bin/spiraler"
+          brew uninstall --formula gridness/oosama/spiraler
+          brew install --cask gridness/oosama/spiraler
+          bash scripts/smoke-linux.sh "$(brew --prefix)/bin/spiraler"

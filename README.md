@@ -23,7 +23,7 @@ The bundle is written to `src-tauri/target/release/bundle/macos/Spiraler.app`. I
 
 ## Releases and Homebrew
 
-Every push to `main` runs [the desktop release workflow](.github/workflows/release.yml). It builds an Apple Silicon DMG and Linux ARM64 and x86_64 packages in parallel on native runners, attaches them to a GitHub release with [automatically generated release notes](https://cli.github.com/manual/gh_release_create), and updates `Casks/spiraler.rb` in `gridness/homebrew-oosama`. The workflow can also be run manually on `main`.
+Every push to `main` runs [the desktop release workflow](.github/workflows/release.yml). It builds an Apple Silicon DMG and Linux ARM64 and x86_64 packages in parallel on native runners, attaches them to a GitHub release with [automatically generated release notes](https://cli.github.com/manual/gh_release_create), and updates `Casks/spiraler.rb` and `Formula/spiraler.rb` in `gridness/homebrew-oosama`. The workflow can also be run manually on `main`.
 
 The macOS app is ad-hoc signed before packaging. The workflow mounts the finished DMG and verifies its app signature, sealed resources, architecture, and version before publication. This avoids shipping an app with only a linker signature, which macOS reports as damaged. Ad-hoc signing does not notarize the app or establish an Apple-verified publisher identity. See [Tauri's signing documentation](https://v2.tauri.app/distribute/sign/macos/).
 
@@ -33,15 +33,24 @@ Bun downloads and Rust dependencies and build outputs are cached separately for 
 
 Release versions use the major and minor numbers from `src-tauri/tauri.conf.json`, with the workflow run number added to its patch number. For example, base `0.1.0` and run `12` produce `0.1.12`, tag `v0.1.12`, and `Spiraler_0.1.12_aarch64.dmg`. All three builds use the same version. Rerunning a workflow keeps its version, preserves published assets, and adds missing downloads; an older run cannot downgrade the cask.
 
-The workflow uses your GitHub App with client ID `Iv23liat5k1xe9You0z0`, installed in `spiraler` and `homebrew-oosama`. Add its PEM private key as the `APP_PRIVATE_KEY` repository Actions secret in `spiraler`. The app must have **Contents: read and write** permission for `homebrew-oosama`, and the tap must allow it to push to `main`. The workflow uses [GitHub's App token action](https://github.com/actions/create-github-app-token) to mint a token scoped to the tap and revoke it when the job finishes. It uses the repository's `GITHUB_TOKEN` to publish Spiraler releases. No Apple signing credentials are required.
+The workflow uses your GitHub App with client ID `Iv23liat5k1xe9You0z0`, installed in `spiraler` and `homebrew-oosama`. Add its PEM private key as the `APP_PRIVATE_KEY` repository Actions secret in `spiraler`. The app must have **Contents: read and write** permission for `homebrew-oosama`, and the tap must allow it to push to `main`. The workflow uses [GitHub's App token action](https://github.com/actions/create-github-app-token) to mint a token scoped to the tap and revoke it when the job finishes. The tap commit uses that App's bot name and email, and the App authenticates its push. It uses the repository's `GITHUB_TOKEN` to publish Spiraler releases. No Apple signing credentials are required.
 
-Once the first release and cask update finish, install with:
+Install the cask on macOS or Linux with current Homebrew:
 
 ```sh
 brew install --cask gridness/oosama/spiraler
 ```
 
-Homebrew also installs the [Codex CLI cask](https://formulae.brew.sh/cask/codex) as a dependency. Sign in as described above to generate images. For a direct DMG installation, install the Codex CLI yourself.
+On Linux, a formula is also available:
+
+```sh
+brew install --formula gridness/oosama/spiraler
+spiraler
+```
+
+Both Linux packages select the ARM64 or x86_64 AppImage and expose the `spiraler` launcher. The formula extracts the AppImage during installation; the cask extracts it on launch. Neither launcher needs FUSE. CI installs and launches both published packages on each Linux architecture under a virtual display. Homebrew supports Linux casks through OS-specific stanzas; see [the cask cookbook](https://docs.brew.sh/Cask-Cookbook).
+
+On macOS, Homebrew also installs the [Codex CLI cask](https://formulae.brew.sh/cask/codex) as a dependency. On Linux or for a direct DMG installation, install the Codex CLI yourself. Sign in as described above to generate images.
 
 The macOS build is ad-hoc signed and not notarized. After trying to open the installed app, approve it in **System Settings → Privacy & Security → Open Anyway** before the first launch. A launch without this approval requires Developer ID signing and Apple notarization, which need Apple Developer credentials.
 
@@ -82,6 +91,7 @@ After restart, jobs interrupted during generation become failed and the remainin
 ```sh
 bun run check
 bun test src
+python3 -m unittest discover -s scripts -p 'test_*.py'
 bun run build
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
